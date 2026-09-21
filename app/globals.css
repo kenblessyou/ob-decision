@@ -2,3 +2,15 @@
 @media(max-width:800px){.entry{grid-template-columns:1fr;gap:26px}.intro{position:static}.intro h1{font-size:42px}.course{display:none}main{padding:28px 18px 45px}.heading{align-items:flex-start;flex-direction:column}.heading h1{font-size:36px}.metrics{grid-template-columns:1fr 1fr}.results-grid{grid-template-columns:1fr}.teacherbar{flex-direction:column;align-items:stretch}.card{padding:22px}.form-grid,.prompts{grid-template-columns:1fr}.team-codes{grid-template-columns:repeat(2,1fr)}.anchors{gap:14px}.histogram{gap:5px}h2{font-size:32px}footer{flex-direction:column}}
 @media(max-width:420px){header{padding:18px}.brand{font-size:30px}.metric{padding:16px}.metric strong{font-size:36px}th,td{padding:10px 5px}thead{font-size:12px}td input{padding:8px;font-size:17px}.sum{font-size:13px}.sum strong{font-size:17px}.card{padding:18px}h1{font-size:38px}.buttons{flex-direction:column}.buttons button{width:100%}}
 @media print{header,footer,.teacherbar,button,.participant-options,.notice,.team-codes{display:none!important}main{padding:0}.card,.metric,.prompts li{break-inside:avoid}.metrics{grid-template-columns:repeat(4,1fr)}.metric{background:white;color:black;border:1px solid #aaa}.metric small{color:#333}.stages{display:none}.results-grid{grid-template-columns:1fr 1fr}.histogram i{background:#555;print-color-adjust:exact}}
+
+/* Study 2 sequential recipient input */
+.sequential .reference-table{border:1px solid var(--line);background:white}
+.sequential table th{width:auto!important}
+.sequential table th:first-child{width:29%!important}
+.sequential .current-member{background:#edf3f0;outline:2px solid #53786e;outline-offset:-2px}
+.sequential .current-member .small{display:block;font-size:11px}
+.member-input{padding:22px;border:1px solid var(--line);background:#fafbf7}
+.member-input label{margin-top:0}
+.member-input input{font-size:24px;max-width:360px}
+.sequential .sum{border-bottom:1px solid var(--line);margin-bottom:20px}
+@media(max-width:600px){.stages span{min-width:130px}.member-input{padding:16px}.sequential table{font-size:13px}.sequential .sum{flex-direction:column;gap:3px}.form-grid{grid-template-columns:1fr}.tag{white-space:normal}}

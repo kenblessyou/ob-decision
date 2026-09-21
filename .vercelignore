@@ -1,0 +1,8 @@
+work-*
+qa-*
+*-hotfix.cjs
+patch-race.cjs
+vercel-ascii.cjs
+.env*
+tests/
+.git/
