@@ -38,3 +38,22 @@ test('server enforces ordered Study 2 flow and hides future conditions',async()=
  await act('withdraw');assert.equal((await c.action({action:'export',code},host) as any).participants.length,0);
 });
 test('simultaneous joins reserve distinct cells without losing participants',async()=>{const {c,code}=await setup();const people=await Promise.all(Array.from({length:17},()=>c.action({action:'join',code,team:1,consent:true,consentVersion:CONSENT_VERSION},'') as Promise<any>));assert.equal(new Set(people.map(x=>x.me.id)).size,17);const room=await c.room(code),all=await c.people(room.value);assert.equal(all.length,18);assert.equal(new Set(all.map(p=>p.assignmentTicket)).size,18);assert.equal(new Set(all.map(p=>p.assignmentCell)).size,18);});
+
+test('host termination closes all access, persists across instances and preserves saved responses',async()=>{
+ const {store,c,code,host,token,act}=await setup();
+ await assert.rejects(act('endSessions'),/Instructor access/);
+ await assert.rejects(c.action({action:'endSessions',code},'wrong-token'),/Instructor access/);
+ await c.action({action:'phase',code,phase:1},host);await act('baseline',{survey:{politics:5}});await act('prepare',{awards,total:1000,self:'included'});await act('round',{index:0,awards});
+ const keys=await store.keys('ob-study2-v8/'+code+'/people/'),before=structuredClone((await store.read<any>(keys[0]))!.value);
+ const ended:any=await c.action({action:'endSessions',code},host);assert.ok(ended.room.sessionsEndedAt);assert.equal(ended.room.phase,2);
+ const after=(await store.read<any>(keys[0]))!.value;assert.deepEqual(after,before);
+ const resumed=new Classroom(store,'test');const again:any=await resumed.action({action:'endSessions',code},host);assert.equal(again.room.sessionsEndedAt,ended.room.sessionsEndedAt);
+ let lists=0;const originalKeys=store.keys.bind(store);store.keys=async prefix=>{lists++;return originalKeys(prefix);};
+ const terminal:any=await resumed.snapshot(code,token);assert.equal(lists,0);assert.equal(terminal.sessionEnded,true);assert.equal(terminal.me,null);assert.equal(terminal.stats,null);assert.deepEqual(terminal.teams,[]);assert.equal(terminal.teamKeys,undefined);
+ await assert.rejects(resumed.action({action:'join',code,team:1,consent:true,consentVersion:CONSENT_VERSION},''),(e:any)=>e.status===410&&e.code==='SESSION_ENDED');
+ for(const action of ['baseline','prepare','round','beginB','reason','finish','team'])await assert.rejects(resumed.action({action,code,index:1,awards},token),(e:any)=>e.status===410);
+ await assert.rejects(resumed.action({action:'phase',code,phase:3},host),(e:any)=>e.status===410);
+ const exported:any=await resumed.action({action:'export',code},host);assert.deepEqual(exported.participants[0].answers,[awards]);assert.equal(exported.sessionsEndedAt,ended.room.sessionsEndedAt);
+ await resumed.action({action:'withdraw',code},token);assert.equal((await resumed.action({action:'export',code},host) as any).participants.length,0);assert.equal((await resumed.room(code)).value.sessionsEndedAt,ended.room.sessionsEndedAt);
+});
+test('termination is supported in waiting, discussion, presentation and wrap-up stages',async()=>{for(const phase of [0,2,3,4]){const {c,code,host}=await setup();for(let p=1;p<=phase;p++)await c.action({action:'phase',code,phase:p},host);const s:any=await c.action({action:'endSessions',code},host);assert.ok(s.room.sessionsEndedAt);assert.equal(s.room.phase,Math.max(phase,2));}});
