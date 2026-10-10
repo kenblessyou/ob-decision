@@ -26,20 +26,30 @@ export class Classroom {
  isHost(r:Room,t:string){return !!t&&hash(t)===r.hostHash;}
  async people(r:Room){const keys=await this.store.keys(prefix+r.code+"/people/"),found:Person[]=[];for(let i=0;i<keys.length;i+=12){const xs=await Promise.all(keys.slice(i,i+12).map(k=>this.store.read<Person>(k)));found.push(...xs.filter((x):x is Stored<Person>=>!!x).map(x=>x.value).filter(p=>!p.withdrawn));}return found;}
  async teams(r:Room){const keys=await this.store.keys(prefix+r.code+"/teams/");return(await Promise.all(keys.map(k=>this.store.read<{team:number;payload:Record<string,unknown>}>(k)))).filter(x=>!!x).map(x=>x!.value).sort((a,b)=>a.team-b.team);}
- async snapshot(code:unknown,t:string){const r=(await this.room(code)).value,host=this.isHost(r,t),p=host?null:(await this.person(r,t)).value;
+ async snapshot(code:unknown,t:string,options:{liveCounts?:boolean}={}){
+ if(!t)fail("Join the class first.",401);
+ const r=(await this.room(code)).value,host=this.isHost(r,t),p=host?null:(await this.person(r,t)).value;
  const room={code:r.code,title:r.title,phase:r.phase,teamCount:r.teamCount,protocol:r.protocol,demo:r.demo,mode:"classroom_same_day",sessionsEndedAt:r.sessionsEndedAt??null};
  if(r.sessionsEndedAt&&!host)return{room,isHost:false,sessionEnded:true,me:null,stats:null,teams:[]};
- const teams=await this.teams(r);
- let counts=r.counts;if(host&&r.phase<=1){const ps=await this.people(r);counts={joined:ps.length,completed:ps.filter(x=>x.submitted).length};}
+ let teams:{team:number;payload?:Record<string,unknown>}[]=[];
+ // Before discussion there are no team results to load. During discussion,
+ // students need only their own team, and hosts need submission indicators.
+ if(r.phase>=3)teams=await this.teams(r);
+ else if(r.phase===2){
+  if(host)teams=(await this.store.keys(prefix+r.code+"/teams/")).map(k=>({team:Number(k.slice(k.lastIndexOf("/")+1,-5))})).filter(x=>Number.isInteger(x.team)&&x.team>=1&&x.team<=r.teamCount).sort((a,b)=>a.team-b.team);
+  else if(p){const own=await this.store.read<{team:number;payload:Record<string,unknown>}>(teamPath(r.code,p.team));if(own)teams=[own.value];}
+ }
+ let counts=r.counts;if(host&&r.phase<=1&&options.liveCounts){const ps=await this.people(r);counts={joined:ps.length,completed:ps.filter(x=>x.submitted).length};}
  const current=p&&p.prepared&&!p.submitted&&p.answers.length<12&&(p.answers.length<4||p.bIntroDone)?publicTrial(p.trials[p.answers.length],p.department):null;
- return{room,isHost:host,counts,stats:r.phase>=2&&r.stats&&r.stats.n>=5?r.stats:null,suppressed:r.phase>=2&&(!r.stats||r.stats.n<5),teamKeys:host?r.teamKeys:undefined,
+ return{room,isHost:host,counts,countsFresh:!host||r.phase>=2||options.liveCounts===true,stats:r.phase>=2&&r.stats&&r.stats.n>=5?r.stats:null,suppressed:r.phase>=2&&(!r.stats||r.stats.n<5),teamKeys:host?r.teamKeys:undefined,
  me:p?{id:p.id,team:p.team,department:p.answers.length>=4?p.department:null,currentTrial:current,answers:p.answers,prepared:p.prepared,submitted:p.submitted,reflection:p.reflection,survey:p.survey,consent:p.consent,preSurveyDone:p.preSurveyDone,surveyOrder:p.surveyOrder,bIntroDone:p.bIntroDone,revision:p.revision,reasons:p.reasons,checks:p.checks,reasonCases:p.answers.length===12?p.reasonIndices.map(i=>({index:i,trial:publicTrial(p.trials[i],p.department),awards:p.answers[i]})):[]}:null,
- teams:r.phase>=3?teams:teams.filter(x=>host||x.team===p?.team).map(x=>host?{team:x.team}:x)};
+ teams};
  }
  async action(b:Record<string,any>,t:string){
  if(b.action==="create"){const key=typeof b.hostKey==="string"?b.hostKey:"",a=Buffer.from(key),expected=Buffer.from(this.hostKey);if(!expected.length||a.length!==expected.length||!timingSafeEqual(a,expected))fail("Enter the instructor key.",401);if(!Number.isInteger(b.teamCount)||b.teamCount<1||b.teamCount>22)fail("Choose 1 to 22 teams.");
  const code=randomBytes(4).toString("hex").toUpperCase(),credential=secret(),r:Room={code,title:text(b.title,80)||"Motivation & Allocation",hostHash:hash(credential),phase:0,teamCount:b.teamCount,teamKeys:Array.from({length:b.teamCount},()=>randomBytes(4).toString("hex")),created:now(),protocol:PROTOCOL,includedIds:[],stats:null,counts:{joined:0,completed:0},closedAt:null,demo:b.demo===true,assignmentNext:0,assignmentSeed:randomInt(0x100000000)};
  await this.store.write(roomPath(code),r);return{credential,...await this.snapshot(code,credential)};}
+ if(b.action!=="join"&&!t)fail("Join the class first.",401);
  let row=await this.room(b.code),r=row.value;
  if(b.action==="join"){if(r.sessionsEndedAt)throw new HttpError("The instructor has ended all student sessions.",410,"SESSION_ENDED");if(!this.ready&&!r.demo)fail("The participation information is not yet complete. Please wait for your instructor.",409);if(r.phase>1)fail("Individual responses have closed.",409);if(b.consent!==true||b.consentVersion!==CONSENT_VERSION)fail("Voluntary consent is required to join. You may choose the no-record activity instead.",403);if(!Number.isInteger(b.team)||b.team<1||b.team>r.teamCount)fail("Check your team number.");
  let ticket=-1;for(let attempt=0;attempt<24;attempt++){row=await this.room(r.code);r=row.value;if(r.sessionsEndedAt)throw new HttpError("The instructor has ended all student sessions.",410,"SESSION_ENDED");if(r.phase>1)fail("Individual responses have closed.",409);try{ticket=r.assignmentNext;await this.store.write(roomPath(r.code),{...r,assignmentNext:ticket+1},row.etag);break;}catch(e){if(!(e instanceof Conflict)||attempt===23)throw e;await new Promise(resolve=>setTimeout(resolve,20+randomInt(80)));}}
@@ -49,7 +59,7 @@ export class Classroom {
  if(b.action==="endSessions"){if(!host)fail("Instructor access required.",403);if(r.sessionsEndedAt)return this.snapshot(r.code,t);if(r.phase<2){const ps=await this.people(r),done=ps.filter(p=>p.submitted);r={...r,phase:2,closedAt:now(),includedIds:done.map(p=>p.id),stats:aggregate(done),counts:{joined:ps.length,completed:done.length}};}r.sessionsEndedAt=now();await this.store.write(roomPath(r.code),r,row.etag);return this.snapshot(r.code,t);}
  if(b.action==="phase"){if(!host)fail("Instructor access required.",403);if(r.sessionsEndedAt)throw new HttpError("Student sessions have ended. Export remains available.",410,"SESSION_ENDED");if(b.phase!==r.phase+1||b.phase>4)fail("Advance one stage at a time.",409);
  if(r.phase===1){const ps=await this.people(r),done=ps.filter(p=>p.submitted);r={...r,closedAt:now(),includedIds:done.map(p=>p.id),stats:aggregate(done),counts:{joined:ps.length,completed:done.length}};}
- r.phase=b.phase;await this.store.write(roomPath(r.code),r,row.etag);return this.snapshot(r.code,t);}
+ r.phase=b.phase;await this.store.write(roomPath(r.code),r,row.etag);return this.snapshot(r.code,t,{liveCounts:r.phase===1});}
  if(b.action==="export"){if(!host)fail("Instructor access required.",403);if(r.phase<2)fail("Close individual responses before exporting.",409);const ps=await this.people(r);return{protocol:r.protocol,consentVersion:CONSENT_VERSION,exportedAt:now(),classCode:r.code,sessionsEndedAt:r.sessionsEndedAt??null,mode:"classroom_same_day",measurementTiming:"Same-day pre-allocation questions; not formal T0 3–7 days before T1.",paymentMode:"No bonus payments or lottery in this classroom activity.",allocationUnits:1000,recipientCount:5,trialCount:12,formalStudy2MainSample:false,assignment:{reserved:r.assignmentNext,joined:ps.length,cells:Array.from({length:18},(_,cell)=>({cell,joined:ps.filter(p=>p.assignmentCell===cell).length,completed:ps.filter(p=>p.assignmentCell===cell&&p.submitted).length}))},participants:ps.map(({tokenHash,...p})=>({...p,inClassSummary:r.includedIds.includes(p.id)})),teams:await this.teams(r),summary:r.stats};}
  if(host)fail("Use a student session for participant actions.",403);
  const pr=await this.person(r,t),p=pr.value,key=personPath(r.code,p.tokenHash);
